@@ -5,6 +5,7 @@
 #include <math.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <nd_malloc.h>
 #include "lpf.h"
 #include "bpf.h"
 #include "func.h"
@@ -20,8 +21,8 @@ int main(int argc, char *argv[]){
   char flnm[256];
   int zn, n, m, k, l, bn, bm, b0[2], b1[2], bc[2];
   int nr, nw, hbsn = (BSNN-1) / 2, hbsm = (BSMM-1) / 2;
-  double ***go, ***g_sff, ***y, **dy01, **dy12, **dy20, ***p, ***go_t;
-  double **d, **d_model, **d_est, **k_est, **d_sff, **k_sff, ***E;
+  double ***go, ***y, **dy01, **dy12, **dy20, ***p, ***go_t;
+  double **d, **d_model, **d_est, **k_est, ***E;
   double **dm_est, **dp_est, ***ydm, ***yd, ***ydp, **dp_model, **dm_model;
   double data[(NHP+NX+NHP) * (NHP+NY+NHP)];
   double dmin, kmin, Emin, dtest, ktest, z, sgm, d_tmp;
@@ -65,93 +66,21 @@ int main(int argc, char *argv[]){
   printf("BS = %d\n", block_size);
   printf("pitch = %d\n", pitch);
   printf("R = %d\n", r);
-}
 
-
-/*--------------------------------------------------------------------------*/
-void usage(char *com)
-{
-  fprintf(stderr, "\n");
-  fprintf(stderr, "  Usage : %s [-bpr]\n\n", com);
-  fprintf(stderr, "          -b <value> : BlockSize Odd   (int)\n");
-  fprintf(stderr, "          -p <value> : Block Pitch     (int)\n");
-  fprintf(stderr, "          -r <value> : Exclusion Block (int)\n");
-  fprintf(stderr, "\n");
-
-  exit(1);
-}
-
-
-  /*
   //---------------------------------------------------------------------------
-  // 領域確保 
+  // 領域確保
   // go[zn][NX][NY]
-  if((go = (double ***)malloc(sizeof(double **) * NZ)) == NULL){
-    fprintf(stderr, "\nError : malloc\n\n");exit(1);
-  }
-  for(zn = 0 ; zn < NZ ; zn++){
-    if((go[zn] = (double **)malloc(sizeof(double *) * (NX+2*NHP))) == NULL){
-      fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-    }
-    go[zn] += NHP;
-    for(n = -NHP ; n < NX + NHP ; n++){
-      if((go[zn][n] = (double *)malloc(sizeof(double ) * (NY+2*NHP))) == NULL){
-        fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-      }
-      go[zn][n] += NHP;
-    }
-  }
-
+  go = malloc_double_3d(NZ, 0, NX + 2*NHP, NHP, NY + 2*NHP, NHP);
+  
   // go_t[zn][15*20][15*13]
-  if((go_t = (double ***)malloc(sizeof(double **) * NZ)) == NULL){
-    fprintf(stderr, "\nError : malloc\n\n");exit(1);
-  }
-  for(zn = 0 ; zn < NZ ; zn++){
-    if((go_t[zn] = (double **)malloc(sizeof(double *) * (NNX+2*NHP))) == NULL){
-      fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-    }
-    go_t[zn] += NHP;
-    for(n = -NHP ; n < NNX + NHP ; n++){
-      if((go_t[zn][n] = (double *)malloc(sizeof(double ) * (NNY+2*NHP))) == NULL){
-        fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-      }
-      go_t[zn][n] += NHP;
-    }
-  }
-
-  // g_sff[zn][NX][NY]
-  if((g_sff = (double ***)malloc(sizeof(double **) * NZ)) == NULL){
-    fprintf(stderr, "\nError : malloc\n\n");exit(1);
-  }
-  for(zn = 0 ; zn < NZ ; zn++){
-    if((g_sff[zn] = (double **)malloc(sizeof(double *) * NX)) == NULL){
-      fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-    }
-    for(n = 0 ; n < NX ; n++){
-      if((g_sff[zn][n] = (double *)malloc(sizeof(double ) * NY)) == NULL){
-        fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-      }
-    }
-  }
+  go_t = malloc_double_3d(NZ, 0, NX + 2*NHP, NHP, NY + 2*NHP, NHP);
 
   // y[2*NZ][BSNN+4*NHP][BSMM+4*NHP]
-  if((y = (double ***)malloc(sizeof(double **) * NZ*2)) == NULL){
-    fprintf(stderr, "\nError : malloc\n\n");exit(1);
-  }
-  for(zn = 0 ; zn < 2*NZ ; zn++){
-    if((y[zn] = (double **)malloc(sizeof(double *) * (BSNN+4*NHP))) == NULL){
-      fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-    }
-    y[zn] += 2*NHP;
-    for(n = -2*NHP ; n < BSNN + 2*NHP ; n++){
-      if((y[zn][n] = (double *)malloc(sizeof(double ) * (BSMM+4*NHP))) == NULL){
-        fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-      }
-      y[zn][n] += 2*NHP;
-    }
-  }
+  y = malloc_double_3d(NZ*2, 0, block_size + 4*NHP, 2*NHP, block_size + 4*NHP, 2*NHP);
 
   // ydm, yd, ydp[][][]
+  yd = malloc_double_3d(NZ*2, 0, block_size + 4*NHP, 2*NHP, block_size + 4*NHP, 2*NHP);
+  
   if((ydm = (double ***)malloc(sizeof(double **) * NZ * 2)) == NULL ||
      (yd = (double ***)malloc(sizeof(double **) * NZ * 2)) == NULL ||
       (ydp = (double ***)malloc(sizeof(double **) * NZ * 2)) == NULL){
@@ -280,13 +209,22 @@ void usage(char *com)
   //---------------------------------------------------------------------------
   // d[]に対象物体のdepth形状を設定する関数を作りたいです
 #if HEIMEN == 0
-
+  for(n = -(2*NHP*K + NHLPF) ; n < (NNX*K + 2*NHP*K + NHLPF) ; n++){
+    for(m = -(2*NHP*K + NHLPF) ; m < (NNY*K + 2*NHP*K + NHLPF) ; m++){    
+      d[n][m] = D0 + (D1-D0) / (double)(NX*K - 1) * n;
+    }
+  }
 #endif
 
 #if HEIMEN == 1
-
+  for(n = -(2*NHP*K + NHLPF) ; n < (NNX*K + 2*NHP*K + NHLPF) ; n++){
+    for(m = -(2*NHP*K + NHLPF) ; m < (NNY*K + 2*NHP*K + NHLPF) ; m++){    
+      d[n][m] = 0.9;
+    }
+  }
 #endif
-
+  
+  /*
   // d[]の保存   
   sprintf(flnm, "./d.dat");
   fp = fopen(flnm, "w");
@@ -299,25 +237,25 @@ void usage(char *com)
     fprintf(fp, "\n");
   }
   fclose(fp);
-
+  */
   //---------------------------------------------------------------------------  
   // freedする data -> goへ
 #if HEIMEN == 0
   for(zn = 0 ; zn < NZ ; zn++){
     //sprintf(flnm, "./zn3_0515/d0515_bi_g%d", zn);
-    sprintf(flnm, "./../obs_img/k16/d0515/d0515_ra_0%d.bin", zn);
+    sprintf(flnm, "./../obs_img/k05/d0515/d0515_ra_0%d.bin", zn);
     fp = fopen(flnm, "r");
     //nr = fread(data, sizeof(float), (NHP+NX+NHP) * (NHP+NY+NHP), fp);
-    nr = fread(data, sizeof(double), (NHP+NX+NHP) * (NHP+NY+NHP), fp);
+    nr = fread(data, sizeof(double), NX*NY, fp);
     printf("nr = %f\n", nr);
-    nw = (NHP+NX+NHP) * (NHP+NY+NHP);
+    nw = NX*NY;
     if(nr != nw){
       fprintf(stderr, "\nError : fread\n\n");exit(1);
     }
 
-    for(m = -NHP ; m < NY + NHP ; m++){
-      for(n = -NHP ; n < NX + NHP ; n++){
-        go[zn][n][m] = (double)data[(m+NHP) * (NHP+NX+NHP) + (n+NHP)];
+    for(m = 0 ; m < NY ; m++){
+      for(n = 0 ; n < NX ; n++){
+        go[zn][n][m] = (double)data[m*NX + n];
       }
     }
   }
@@ -410,12 +348,24 @@ void usage(char *com)
     // down side
     for(n = -NHP ; n < NNX + NHP ; n++){
       for(m = 1 ; m <= NHP ; m++){
-	      go_t[zn][n][NNY - 1 + m] = go_t[zn][n][NNY - 1 - m];
+	go_t[zn][n][NNY - 1 + m] = go_t[zn][n][NNY - 1 - m];
       }
     }
+    
 
-
-  //ピッチ分だけ動かしながら、ブロックの中心の座標とブロックサイズ等をGause-Newton関数へ
-  
+    //ピッチ分だけ動かしながら、ブロックの中心の座標とブロックサイズ等をGause-Newton関数へ
+    
+  }
 }
-*/
+  
+/*--------------------------------------------------------------------------*/
+void usage(char *com){
+  fprintf(stderr, "\n");
+  fprintf(stderr, "  Usage : %s [-bpr]\n\n", com);
+  fprintf(stderr, "          -b <value> : BlockSize Odd   (int)\n");
+  fprintf(stderr, "          -p <value> : Block Pitch     (int)\n");
+  fprintf(stderr, "          -r <value> : Exclusion Block (int)\n");
+  fprintf(stderr, "\n");
+
+  exit(1);
+}

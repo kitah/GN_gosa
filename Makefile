@@ -1,7 +1,7 @@
 TARGET = kizami
-OBJS = main.o func.o
+OBJS = main.o func.o Gauss_Newton.o
 CFLAGS = -I$(INCLUDEDIR) -g -Wall -O2
-LIBS = -L$(LIBDIR) -limageio -lm
+LIBS = -L$(LIBDIR) -lnd_malloc -limageio -lm 
 CC = gcc
 .c.o:
 	$(CC) $(CFLAGS) -c $<
