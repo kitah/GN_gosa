@@ -1,5 +1,5 @@
-TARGET = kizami
-OBJS = main.o func.o Gauss_Newton.o
+TARGET = gngosa
+OBJS = main.o Gauss_Newton.o gauss.o
 CFLAGS = -I$(INCLUDEDIR) -g -Wall -O2
 LIBS = -L$(LIBDIR) -lnd_malloc -limageio -lm 
 CC = gcc
@@ -13,6 +13,6 @@ $(TARGET): $(OBJS)
 clean:
 	rm -f *.o $(TARGET) core *~
 
-main.o : func.h
-main.o : lpf.h
-func.o : func.h
+#main.o : func.h
+#main.o : lpf.h
+#func.o : func.h

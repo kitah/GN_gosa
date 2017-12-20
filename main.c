@@ -6,35 +6,49 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <nd_malloc.h>
-#include "lpf.h"
-#include "bpf.h"
-#include "func.h"
 
 /**** Default値の設定 ****/
-#define BLOCK_SIZE 13
-#define PITCH     13
-#define RR         1
+#define BLOCK_SIZE  13
+#define PITCH       13
+#define RR           1
+
+// フラグ
+#define QUANT_FLG    0
+#define ONOISE_FLG   0
+#define LIMIT_FLG    0
+#define SRAND_FLG    0
+#define HEIMEN       0
+
+#define NX         320
+#define NY         240
+#define NZ           3
+
+#define D0         0.5
+#define D1         1.5
+
+#define K            8
+
+#define NHP         11
+#define NHLPF       25
 
 int main(int argc, char *argv[]){
   FILE *fp;
   IMAGE img_go;
   char flnm[256];
-  int zn, n, m, k, l, bn, bm, b0[2], b1[2], bc[2];
-  int nr, nw, hbsn = (BSNN-1) / 2, hbsm = (BSMM-1) / 2;
-  double ***go, ***y, **dy01, **dy12, **dy20, ***p, ***go_t;
-  double **d, **d_model, **d_est, **k_est, ***E;
-  double **dm_est, **dp_est, ***ydm, ***yd, ***ydp, **dp_model, **dm_model;
+  int nr, nw, zn, n, m, bn, bm, b0[2], b1[2];
+  double ***go, ***go_t;
+  double **d, **d_model, **d_est, **k_est;
   double data[(NHP+NX+NHP) * (NHP+NY+NHP)];
-  double dmin, kmin, Emin, dtest, ktest, z, sgm, d_tmp;
-  double EE[3], sum_EE = 0.0, tmp, RMSE;
+  //double dmin, kmin, Emin, dtest, ktest, z, sgm, d_tmp;
+  //  double EE[3], sum_EE = 0.0;
+  //double alpha = 0.0, dmax[NNB], d_min[NNB];
   time_t t1, t2;
   t1 = time(NULL);
-
-  double alpha = 0.0, dmax[NNB], d_min[NNB];
   
   int pitch = PITCH, block_size = BLOCK_SIZE, r = RR;
   char c;
   void usage(char *);
+  void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y, double *dk);
   
 #if SRAND_FLG == 1
   srandom(time(NULL));
@@ -63,154 +77,50 @@ int main(int argc, char *argv[]){
   //  argv += (optind - 1);
   //  if(argc > 2) usage(argv[0]);
 
-  printf("BS = %d\n", block_size);
+  printf("\nBS = %d\n", block_size);
   printf("pitch = %d\n", pitch);
   printf("R = %d\n", r);
 
+  int num_bsx = 0, num_bsy = 0;
+  int  hbsn = (block_size-1) / 2, hbsm = (block_size-1) / 2;
+  n = m = 0;
+  while(block_size + pitch*(n+1) < NX){
+    n++;
+    num_bsx++;
+  }
+  while(block_size + pitch*(m+1) < NY){
+    m++;
+    num_bsy++;
+  }
+  printf("block_num_x, block_num_y: %d %d\n", num_bsx+1, num_bsy+1);
+  
+  int NNX, NNY;
+  NNX = block_size + num_bsx*pitch;
+  NNY = block_size + num_bsy*pitch;
+  printf("NNX : %d\n", NNX);
+  printf("NNY : %d\n", NNY);
+  
   //---------------------------------------------------------------------------
-  // 領域確保
+  // 領域確保 nd_malloc
   // go[zn][NX][NY]
   go = malloc_double_3d(NZ, 0, NX + 2*NHP, NHP, NY + 2*NHP, NHP);
   
   // go_t[zn][15*20][15*13]
-  go_t = malloc_double_3d(NZ, 0, NX + 2*NHP, NHP, NY + 2*NHP, NHP);
-
-  // y[2*NZ][BSNN+4*NHP][BSMM+4*NHP]
-  y = malloc_double_3d(NZ*2, 0, block_size + 4*NHP, 2*NHP, block_size + 4*NHP, 2*NHP);
-
-  // ydm, yd, ydp[][][]
-  yd = malloc_double_3d(NZ*2, 0, block_size + 4*NHP, 2*NHP, block_size + 4*NHP, 2*NHP);
-  
-  if((ydm = (double ***)malloc(sizeof(double **) * NZ * 2)) == NULL ||
-     (yd = (double ***)malloc(sizeof(double **) * NZ * 2)) == NULL ||
-      (ydp = (double ***)malloc(sizeof(double **) * NZ * 2)) == NULL){
-    fprintf(stderr, "\nError : malloc\n\n");exit(1);
-  }
-  for(zn = 0 ; zn < 2*NZ ; zn++){
-    if((ydm[zn] = (double **)malloc(sizeof(double *) * (INBS + 4*NHP))) == NULL ||
-       (yd[zn] = (double **)malloc(sizeof(double *) * (INBS + EXBS*2 + 4*NHP))) == NULL ||
-       (ydp[zn] = (double **)malloc(sizeof(double *) * (INBS + 4*NHP))) == NULL){
-      fprintf(stderr, "\nError : malloc\n\n");exit(1);
-    }
-    ydm[zn] += 2*NHP;
-    yd[zn] += 2*NHP;
-    ydp[zn] += 2*NHP;
-    for(n = -2*NHP ; n < INBS + EXBS*2 + 2*NHP ; n++){
-      if((ydm[zn][n] = (double *)malloc(sizeof(double ) * (BSMM + 4*NHP))) == NULL ||
-	 (yd[zn][n] = (double *)malloc(sizeof(double ) * (INBS + EXBS*2 + 4*NHP))) == NULL ||
-	 (ydp[zn][n] = (double *)malloc(sizeof(double ) * (BSMM + 4*NHP))) == NULL){
-	fprintf(stderr, "\nError : malloc\n\n");exit(1);
-      }
-      ydm[zn][n] += 2*NHP;
-      yd[zn][n] += 2*NHP;
-      ydp[zn][n] += 2*NHP;
-    }
-  }
-  
-
-  // dy01, dy12, dy20[BSNN][BSMM]
-  if ((dy01  = (double **)malloc(sizeof(double *) * (BSNN + 2*NHP)) ) == NULL ||
-      (dy12  = (double **)malloc(sizeof(double *) * (BSNN + 2*NHP)) ) == NULL ||
-      (dy20  = (double **)malloc(sizeof(double *) * (BSNN + 2*NHP)) ) == NULL) {
-        fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-  }
-  dy01 += NHP;
-  dy12 += NHP;
-  dy20 += NHP;
-  for(n = -NHP ; n < BSNN  + NHP; n++) {
-    if ((dy01[n]  = (double *)malloc(sizeof(double) * (BSMM + 2*NHP)) ) == NULL ||
-        (dy12[n]  = (double *)malloc(sizeof(double) * (BSMM + 2*NHP)) ) == NULL ||
-        (dy20[n]  = (double *)malloc(sizeof(double) * (BSMM + 2*NHP)) ) == NULL) {
-          fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-    }
-    dy01[n] += NHP;
-    dy12[n] += NHP;
-    dy20[n] += NHP;
-  }
-
-  // p[zn][2*NHP+1][2*NHP+1]
-  if((p = (double ***)malloc(sizeof(double **) * NZ)) == NULL){
-    fprintf(stderr, "\nError : malloc\n\n");exit(1);
-  }
-  for(zn = 0 ; zn < NZ ; zn++){
-    if((p[zn] = (double **)malloc(sizeof(double *) * (2*NHP+1))) == NULL){
-      fprintf(stderr, "\nError : malloc\n\n");exit(1);
-    }
-    p[zn] += NHP;
-    for(n = -NHP ; n < 1+NHP ; n++){
-      if((p[zn][n] = (double *)malloc(sizeof(double ) * (2*NHP+1))) == NULL){
-        fprintf(stderr, "\nError : malloc\n\n");exit(1);    
-      }
-      p[zn][n] += NHP;
-    }
-  }
+  go_t = malloc_double_3d(NZ, 0, NNX + 2*NHP, NHP, NNY + 2*NHP, NHP);
 
   // d
-  if ( (d = (double **)malloc(sizeof(double *) * (NNX*K + 2*NHLPF + 4*NHP*K)) ) == NULL) {
-    fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-  }
-  d += NHLPF + 2*NHP*K;
-  for(n = -(NHLPF + 2*NHP*K) ; n < NNX*K + NHLPF + 2*NHP*K ; n++) {
-    if ( (d[n] = (double *)malloc(sizeof(double) * (NNY*K + 2*NHLPF + 4*NHP*K)) ) == NULL) {
-      fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-    }
-    d[n] += NHLPF + 2*NHP*K;
-  }
+  d = malloc_double_2d(NX*K + 2*NHLPF + 4*NHP*K, NHLPF + 2*NHP*K, NY*K + 2*NHLPF + 4*NHP*K, NHLPF + 2*NHP*K);
 
-  // d_model, d_est, k_est[NB][MB], dm,dp_est
-  if ((d_model  = (double **)malloc(sizeof(double *) * NNB) ) == NULL ||
-      (dm_model  = (double **)malloc(sizeof(double *) * NNB) ) == NULL ||
-      (dp_model  = (double **)malloc(sizeof(double *) * NNB) ) == NULL ||
-      (d_est  = (double **)malloc(sizeof(double *) * NNB) ) == NULL ||
-      (dm_est  = (double **)malloc(sizeof(double *) * NNB) ) == NULL ||
-      (dp_est  = (double **)malloc(sizeof(double *) * NNB) ) == NULL ||
-      (k_est  = (double **)malloc(sizeof(double *) * NNB) ) == NULL) {
-        fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-  }
-  for(n = 0 ; n < NNB ; n++) {
-    if ((d_model[n]  = (double *)malloc(sizeof(double) * MMB) ) == NULL ||
-	(dm_model[n]  = (double *)malloc(sizeof(double) * MMB) ) == NULL ||
-	(dp_model[n]  = (double *)malloc(sizeof(double) * MMB) ) == NULL ||
-        (d_est[n]  = (double *)malloc(sizeof(double) * MMB) ) == NULL ||
-	(dm_est[n]  = (double *)malloc(sizeof(double ) * MMB) ) == NULL ||
-	(dp_est[n]  = (double *)malloc(sizeof(double ) * MMB) ) == NULL ||
-        (k_est[n]  = (double *)malloc(sizeof(double) * MMB) ) == NULL) {
-          fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-    }
-  }
-
-  // d_sff, k_sff[NB][MB]
-  if ((d_sff  = (double **)malloc(sizeof(double *) * NB) ) == NULL ||
-      (k_sff  = (double **)malloc(sizeof(double *) * NB) ) == NULL) {
-       fprintf(stderr, "\nError : malloc\n\n"); exit(1); 
-  }
-  for(n = 0 ; n < NB ; n++) {
-    if ((d_sff[n]  = (double *)malloc(sizeof(double) * MB) ) == NULL ||
-        (k_sff[n]  = (double *)malloc(sizeof(double) * MB) ) == NULL) {
-          fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-    }
-  }
-
-  // E
-  if ( (E = (double ***)malloc(sizeof(double **) * NNB) ) == NULL) {
-    fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-  }
-  for(n = 0 ; n < NNB ; n++) {
-    if ( (E[n] = (double **)malloc(sizeof(double *) * MMB) ) == NULL) {
-      fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-    }
-    for(m = 0 ; m < MMB ; m++){    
-      if ( (E[n][m] = (double *)malloc(sizeof(double) * (int)(DZ / DD)) ) == NULL) {
-	      fprintf(stderr, "\nError : malloc\n\n"); exit(1);
-      }
-    }
-  }
+  // d_model, d_est, k_est [num_bsx][num_bsy]
+  d_model = malloc_double_2d(num_bsx+1, 0, num_bsy+1, 0);
+  d_est = malloc_double_2d(num_bsx+1, 0, num_bsy+1, 0);
+  k_est = malloc_double_2d(num_bsx+1, 0, num_bsy+1, 0);
 
   //---------------------------------------------------------------------------
   // d[]に対象物体のdepth形状を設定する関数を作りたいです
 #if HEIMEN == 0
-  for(n = -(2*NHP*K + NHLPF) ; n < (NNX*K + 2*NHP*K + NHLPF) ; n++){
-    for(m = -(2*NHP*K + NHLPF) ; m < (NNY*K + 2*NHP*K + NHLPF) ; m++){    
+  for(n = -(2*NHP*K + NHLPF) ; n < (NX*K + 2*NHP*K + NHLPF) ; n++){
+    for(m = -(2*NHP*K + NHLPF) ; m < (NY*K + 2*NHP*K + NHLPF) ; m++){    
       d[n][m] = D0 + (D1-D0) / (double)(NX*K - 1) * n;
     }
   }
@@ -223,31 +133,25 @@ int main(int argc, char *argv[]){
     }
   }
 #endif
-  
-  /*
+    
   // d[]の保存   
   sprintf(flnm, "./d.dat");
   fp = fopen(flnm, "w");
-  //for(n = -(2*NHP*K + NHLPF) ; n < (NX*K + 2*NHP*K + NHLPF) ; n++){
-  //for(m = -(2*NHP*K + NHLPF) ; m < (NY*K + 2*NHP*K + NHLPF) ; m++){}
-  for(n = 0 ; n < NNX ; n++){
-    for(m = 0 ; m < NNY ; m++){
+  for(n = 0 ; n < NX ; n++){
+    for(m = 0 ; m < NY ; m++){
       fprintf(fp, "%d %d %f\n", n, m, d[n*K][m*K]);
     }
     fprintf(fp, "\n");
   }
   fclose(fp);
-  */
+  
   //---------------------------------------------------------------------------  
   // freedする data -> goへ
 #if HEIMEN == 0
   for(zn = 0 ; zn < NZ ; zn++){
-    //sprintf(flnm, "./zn3_0515/d0515_bi_g%d", zn);
     sprintf(flnm, "./../obs_img/k05/d0515/d0515_ra_0%d.bin", zn);
     fp = fopen(flnm, "r");
-    //nr = fread(data, sizeof(float), (NHP+NX+NHP) * (NHP+NY+NHP), fp);
     nr = fread(data, sizeof(double), NX*NY, fp);
-    printf("nr = %f\n", nr);
     nw = NX*NY;
     if(nr != nw){
       fprintf(stderr, "\nError : fread\n\n");exit(1);
@@ -304,7 +208,7 @@ int main(int argc, char *argv[]){
 #endif
       }
     }
-
+    
     //---------------------------------------------------------------------------
     // go[zn][]の保存
     sprintf(flnm, "./model/go%d.dat", zn);
@@ -321,7 +225,16 @@ int main(int argc, char *argv[]){
     wIMAGE(img_go, flnm);
   }//zn
 
-  printf("---orikaesi start---\n");
+  for(zn = 0 ; zn < NZ ; zn++){
+    for(n = 0 ; n < NNX ; n++){
+      for(m = 0 ; m < NNY ; m++){
+	go_t[zn][n][m] = go[zn][n][m];
+      }
+    }
+  }
+  
+  //---------------------------------------------------------------------------
+  printf("------------------------\n");
   // 折り返し処理 折り返した部分は誤差計算には使わない
   for(zn = 0 ; zn < NZ ; zn++){
     // left side
@@ -351,11 +264,80 @@ int main(int argc, char *argv[]){
 	go_t[zn][n][NNY - 1 + m] = go_t[zn][n][NNY - 1 - m];
       }
     }
-    
-
-    //ピッチ分だけ動かしながら、ブロックの中心の座標とブロックサイズ等をGause-Newton関数へ
-    
   }
+
+  //---------------------------------------------------------------------------
+  //ピッチ分だけ動かしながら、ブロックの中心の座標とブロックサイズ等をGause-Newton関数へ
+  double dk[2];
+  for(bm = 0 ; bm <= num_bsy ; bm++){
+    for(bn = 0 ; bn <= num_bsx ; bn++){
+      gaussNewtonMethod(go, NZ, block_size, hbsn + pitch*bn, hbsm + pitch*bm, dk);
+      d_est[bn][bm] = dk[0];
+      k_est[bn][bm] = dk[1];
+    }
+    }
+  //gaussNewtonMethod(go, block_size, 27, 27, dk);
+  
+  sprintf(flnm, "./d_est.dat");
+  fp = fopen(flnm, "w");
+  for(bn = r ; bn <= num_bsx - r ; bn++){
+    for(bm = r ; bm <= num_bsy - r ; bm++){
+      fprintf(fp, "%4d %4d  %f\n", bn*pitch + hbsn, bm*pitch + hbsm, d_est[bn][bm]);
+    }
+    fprintf(fp, "\n");
+  }
+  fclose(fp);
+
+  //---------------------------------------------------------------------------  
+  // ブロック単位のモデル形状
+  double tmp;
+  for(bn = 0 ; bn <= num_bsx ; bn++){
+    b0[0] = bn * pitch;    // 0, 10, 20, ... exp. pitch = 10 
+    b1[0] = b0[0] + block_size; // 15, 25, ...
+    for(bm = 0 ; bm <= num_bsy ; bm++){
+      b0[1] = bm * pitch;
+      b1[1] = b0[1] + block_size;
+
+      tmp = 0.0;
+      for(n = b0[0] ; n < b1[0] ; n++){
+        for(m = b0[1] ; m < b1[1] ; m++){
+          tmp += d[n * K][m * K];
+        }
+      }
+
+      d_model[bn][bm] = tmp / (double)(block_size * block_size);
+    }
+  }
+  sprintf(flnm, "./d_model.dat");
+  fp = fopen(flnm, "w");
+  for(bn = r ; bn <= num_bsx - r ; bn++){
+    for(bm = r ; bm <= num_bsy - r ; bm++){
+      fprintf(fp, "%4d %4d  %f\n", bn*pitch + hbsn, bm*pitch + hbsm, d_model[bn][bm]);
+    }
+    fprintf(fp, "\n");
+  }
+  fclose(fp);
+  
+  //---------------------------------------------------------------------------
+  // RMSE -rで指定した分だけ外側のブロックは誤差計測に使用しない
+  int sum = 0;
+  double RMSE;
+  tmp = 0.0;
+  RMSE = 0.0;
+  for(bm = r ; bm <= num_bsy - r ; bm++){
+    for(bn = r ; bn <= num_bsx - r ; bn++){
+      tmp = d_model[bn][bm] - d_est[bn][bm];
+      RMSE += tmp * tmp;
+      sum++;
+    }
+  }
+  printf("all block num = %d\n", sum);
+  RMSE = sqrt(RMSE / (double)(sum));
+  printf("RMSE = %f\n", RMSE);
+  
+  t2 = time(NULL);
+  printf("\n");
+  printf("[time] : %d[minutes]\n\n", (int)((t2 - t1)/60));
 }
   
 /*--------------------------------------------------------------------------*/

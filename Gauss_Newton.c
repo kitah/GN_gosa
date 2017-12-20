@@ -1,30 +1,27 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <nd_malloc.h>
 #include <imageio.h>
 
-#define NZ 3
-#define SGMC 0.6
+#define SGMC 0.9
 #define PSF_HS 11
 #define h(x,y) hh[(x)+(L-1)/2][(y)+(L-1)/2]
+#define DELTA 0.001
 
-void gaussNewtonMethod(double **fn, int BS, int center_x, int center_y, double *dk){
-  //  FILE *fp;
-  //IMAGE in_img;
-  char flnm[256];
-  int nr, nw, zn,i, j, n, m, count;
-  double d, sgmc = SGMC;
+void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y, double *dk){
+  int i, j, count, NZ = nz;
+  double sgmc = SGMC;
   double tmp_e1, tmp_e2, tmp_e3;
   double tmp_a00_01, tmp_a00_12, tmp_a00_02, tmp_a01_01, tmp_a01_12, tmp_a01_02, tmp_a11_01, tmp_a11_12, tmp_a11_02;
   double a00, a01, a10, a11, b0, b1;
   double **f0p1, **f1p0, **f1p2, **f2p1, **f0p2, **f2p0;
   double **f0pd1, **f1pd0, **f1pd2, **f2pd1, **f0pd2, **f2pd0;
   double **f0pk1, **f1pk0, **f1pk2, **f2pk1, **f0pk2, **f2pk0;
-  //  double ***fn;
   double **p0, **p1, **p2;
-  double data[NX * NY];
-  double e[NZ], mz[NZ], d0k0[2];
-  double k0, d0, deltad, deltak, dprev, kprev;
+  double e[NZ], mz[NZ], d0k0[2], e1[NZ];
+  double k0, d0, deltad, deltak, dprev, kprev, eprev, enow;
+  double d, k, **p0dk, **p1dk, **p2dk;
   
   void psf(double k, int z, double d, double sgmc, int psf_hs, double **p);
   void dpsfdd(double k, int z, double d, double sgmc, int psf_hs, double **p);
@@ -33,8 +30,8 @@ void gaussNewtonMethod(double **fn, int BS, int center_x, int center_y, double *
   void make_fnpdn(int bs, int center_x, int center_y, double **fn, double **fnpdn, double k, int z, double d, double sgmc);
   void make_fnpkn(int bs, int center_x, int center_y, double **fn, double **fnpkn, double k, int z, double d, double sgmc);  
   void num_diff_method(int bs, double ** fnpndelta, double **fnpn, double **f);
-  void filter(double ***fn, int center_x, int center_y, double *mz);
-  void calculate_d_k(double *mz, double *d0k0);
+  void filter(double ***fn, int nz, int BS, int center_x, int center_y, double *mz);
+  void calculate_d_k(double *mz, int nz, double *d0k0);
 
   //-----------------------------------------------------------------------------
   // malloc
@@ -42,6 +39,10 @@ void gaussNewtonMethod(double **fn, int BS, int center_x, int center_y, double *
   p1   = malloc_double_2d(2 * PSF_HS + 1, PSF_HS,  2 * PSF_HS + 1, PSF_HS);
   p2   = malloc_double_2d(2 * PSF_HS + 1, PSF_HS,  2 * PSF_HS + 1, PSF_HS);  
 
+  p0dk   = malloc_double_2d(2 * PSF_HS + 1, PSF_HS,  2 * PSF_HS + 1, PSF_HS);
+  p1dk   = malloc_double_2d(2 * PSF_HS + 1, PSF_HS,  2 * PSF_HS + 1, PSF_HS);
+  p2dk   = malloc_double_2d(2 * PSF_HS + 1, PSF_HS,  2 * PSF_HS + 1, PSF_HS);  
+  
   f0p1 = malloc_double_2d(BS, 0, BS, 0);
   f1p0 = malloc_double_2d(BS, 0, BS, 0);
   f1p2 = malloc_double_2d(BS, 0, BS, 0);
@@ -63,8 +64,8 @@ void gaussNewtonMethod(double **fn, int BS, int center_x, int center_y, double *
   f0pk2 = malloc_double_2d(BS, 0, BS, 0);
   f2pk0 = malloc_double_2d(BS, 0, BS, 0);
 
-  filter(fn, CENTER_X, CENTER_Y, mz);
-  calculate_d_k(mz, d0k0);
+  filter(fn, NZ, BS, center_x, center_y, mz);
+  calculate_d_k(mz, NZ, d0k0);
 
   //printf("\nest_d  est_k for SFF: \n");
   //printf("[%f %f]\n\n", d0k0[0], d0k0[1]);
@@ -72,9 +73,30 @@ void gaussNewtonMethod(double **fn, int BS, int center_x, int center_y, double *
   d0 = d0k0[0];
   k0 = d0k0[1];
   count = 0;
+  d = 0.584408;
+  k = 0.5;
+
+  psf(k, 0, d, sgmc, PSF_HS, p0dk);
+  psf(k, 1, d, sgmc, PSF_HS, p1dk);
+  psf(k, 2, d, sgmc, PSF_HS, p2dk);
+  double tmp1 = 0.0, tmp2 = 0.0, tmp3 = 0.0;
+  for(j = 0 ; j < BS ; j++){
+    for(i = 0 ; i < BS ; i++){
+      tmp1 = (f0p1[i][j] - f1p0[i][j]);
+      tmp2 = (f1p2[i][j] - f2p1[i][j]);
+      tmp3 = (f0p2[i][j] - f2p0[i][j]);
+      
+      e1[0] += tmp1 * tmp1;
+      e1[1] += tmp2 * tmp2;
+      e1[2] += tmp3 * tmp3;
+    }
+  }
+  
+  eprev = enow = 0.0;
   
   // do-whileのループで対象のブロックのdepth"d"とレンズ定数"k"を推定する
   do{
+    eprev = enow;
     psf(k0, 0, d0, sgmc, PSF_HS, p0);
     psf(k0, 1, d0, sgmc, PSF_HS, p1);
     psf(k0, 2, d0, sgmc, PSF_HS, p2);
@@ -132,7 +154,9 @@ void gaussNewtonMethod(double **fn, int BS, int center_x, int center_y, double *
     }
     
     //printf("E[%d] = %f\n", count, e[0] + e[1] + e[2]);
+    enow = e[0] + e[1] + e[2];
 
+    //printf("eprev = %f enow = %f\n", eprev, enow);
     a00 = tmp_a00_01 + tmp_a00_12 + tmp_a00_02;
     a01 = tmp_a01_01 + tmp_a01_12 + tmp_a01_02;
     a10 = a01;
@@ -155,11 +179,12 @@ void gaussNewtonMethod(double **fn, int BS, int center_x, int center_y, double *
     
     //printf("deltak: %f\n", deltak);
     //printf("k0: %f\n", k0);
-
+    
     count++;
-  } while(fabs(deltad) > 1.0E-2);
+  }while(fabs(eprev - enow) > 0.0001);
+  //} while(fabs(deltad) > 0.01);
   //printf("\n");
-    //  } while( fabs( (dprev - d) - (d0 - d) ) / fabs(dprev - d) > 0.1);
+  //  } while( fabs( (dprev - model_d) - (d0 - model_d) ) / fabs(dprev - model_d) > 0.01);
     /*
   printf("--------------------------------------------\n");
   printf("loop = %d\n", count);
@@ -169,6 +194,9 @@ void gaussNewtonMethod(double **fn, int BS, int center_x, int center_y, double *
   printf("gosa = %f\n", d0 - d);
   */
   //free_double_2d(p, 2 * PSF_HS + 1, PSF_HS,  2 * PSF_HS + 1, PSF_HS);
+  //rintf("estE = %f\n", enow);
+  //printf("trueE = %f\n", e1[0]+e1[1]+e1[2]);
+  
   dk[0] = d0;
   dk[1] = k0;
 }
@@ -322,7 +350,7 @@ void num_diff_method(int bs, double ** fnpndelta, double **fnpn, double **f){
 }
 
 /*---------------------------------------------------------------------*/
- void filter(double ***fn, int center_x, int center_y, double *mz){
+void filter(double ***fn, int nz, int BS, int center_x, int center_y, double *mz){
    //LPF
    double hh[9][9] =
      {
@@ -428,7 +456,7 @@ void num_diff_method(int bs, double ** fnpndelta, double **fnpn, double **f){
      };
       
    int L = 9, L1 = (L-1)/2;
-   int zn, i, j, ii, jj, xsize, ysize, hbs;
+   int zn, i, j, ii, jj, xsize, ysize, hbs, NZ = nz;
    double **g, f_tmp, **gz, ***in_img;
    
    xsize = BS;
@@ -506,8 +534,8 @@ void num_diff_method(int bs, double ** fnpndelta, double **fnpn, double **f){
 /*---------------------------------------------------------------------*/
 //p, q = bs. do this in each block
 
-void calculate_d_k(double *mz, double *d0k0){
-  int x1, x2, x3, max_n = 0, n;
+void calculate_d_k(double *mz, int nz, double *d0k0){
+  int x1, x2, x3, max_n = 0, n, NZ = nz;
   double max = 0, y1, y2, y3, a, b;//c
   double a1, a2, a3, b1, b2, b3, c1, c2, c3, d1, d2, d3;
   
