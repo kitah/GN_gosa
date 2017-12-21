@@ -152,7 +152,7 @@ int main(int argc, char *argv[]){
 #if HEIMEN == 0
   for(zn = 0 ; zn < NZ ; zn++){
     //sprintf(flnm, "./../obs_img/k05/d0515/d0515_ra_0%d.bin", zn);
-    sprintf(flnm, "/home/v4/tyoshida/imagep/focus/kmfg/md3/gauss20/pd/k05/py/md_ra_0%d.bin", zn);
+    sprintf(flnm, "/home/v4/tyoshida/imagep/focus/kmfg/md3/gauss20/no/k05/pl/md_ra_0%d.bin", zn);
     fp = fopen(flnm, "r");
     nr = fread(data, sizeof(double), NX*NY, fp);
     nw = NX*NY;
@@ -168,7 +168,7 @@ int main(int argc, char *argv[]){
   }
   
   // model.binをfreedする
-  sprintf(flnm, "/home/v4/tyoshida/imagep/focus/kmfg/md3/gauss20/pd/k05/py/md_model.bin");
+  sprintf(flnm, "/home/v4/tyoshida/imagep/focus/kmfg/md3/gauss20/no/k05/pl/md_model.bin");
   fp = fopen(flnm, "r");
   nr = fread(data, sizeof(double), NX*NY, fp);
   nw = NX*NY;
