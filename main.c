@@ -36,12 +36,10 @@ int main(int argc, char *argv[]){
   IMAGE img_go;
   char flnm[256];
   int nr, nw, zn, n, m, bn, bm, b0[2], b1[2];
-  double ***go, ***go_t;
-  double **d, **d_model, **d_est, **k_est;
+  double ***go, ***go_t, **model_depth, **model_d;
+  double **d, **d_est, **k_est, tmp;//**d_model
   double data[(NHP+NX+NHP) * (NHP+NY+NHP)];
-  //double dmin, kmin, Emin, dtest, ktest, z, sgm, d_tmp;
-  //  double EE[3], sum_EE = 0.0;
-  //double alpha = 0.0, dmax[NNB], d_min[NNB];
+
   time_t t1, t2;
   t1 = time(NULL);
   
@@ -108,16 +106,20 @@ int main(int argc, char *argv[]){
   // go_t[zn][15*20][15*13]
   go_t = malloc_double_3d(NZ, 0, NNX + 2*NHP, NHP, NNY + 2*NHP, NHP);
 
+  // model.binをfreedして格納するための配列
+  model_depth = malloc_double_2d(NX, 0, NY, 0);
+  model_d = malloc_double_2d(num_bsx+1, 0, num_bsy+1, 0);
+
   // d
   d = malloc_double_2d(NX*K + 2*NHLPF + 4*NHP*K, NHLPF + 2*NHP*K, NY*K + 2*NHLPF + 4*NHP*K, NHLPF + 2*NHP*K);
 
   // d_model, d_est, k_est [num_bsx][num_bsy]
-  d_model = malloc_double_2d(num_bsx+1, 0, num_bsy+1, 0);
+  //d_model = malloc_double_2d(num_bsx+1, 0, num_bsy+1, 0);
   d_est = malloc_double_2d(num_bsx+1, 0, num_bsy+1, 0);
   k_est = malloc_double_2d(num_bsx+1, 0, num_bsy+1, 0);
 
   //---------------------------------------------------------------------------
-  // d[]に対象物体のdepth形状を設定する関数を作りたいです
+  // d[]に対象物体のdepth形状を設定する
 #if HEIMEN == 0
   for(n = -(2*NHP*K + NHLPF) ; n < (NX*K + 2*NHP*K + NHLPF) ; n++){
     for(m = -(2*NHP*K + NHLPF) ; m < (NY*K + 2*NHP*K + NHLPF) ; m++){    
@@ -149,7 +151,8 @@ int main(int argc, char *argv[]){
   // freedする data -> goへ
 #if HEIMEN == 0
   for(zn = 0 ; zn < NZ ; zn++){
-    sprintf(flnm, "./../obs_img/k05/d0515/d0515_ra_0%d.bin", zn);
+    //sprintf(flnm, "./../obs_img/k05/d0515/d0515_ra_0%d.bin", zn);
+    sprintf(flnm, "/home/v4/tyoshida/imagep/focus/kmfg/md3/gauss20/pd/k05/py/md_ra_0%d.bin", zn);
     fp = fopen(flnm, "r");
     nr = fread(data, sizeof(double), NX*NY, fp);
     nw = NX*NY;
@@ -163,6 +166,50 @@ int main(int argc, char *argv[]){
       }
     }
   }
+  
+  // model.binをfreedする
+  sprintf(flnm, "/home/v4/tyoshida/imagep/focus/kmfg/md3/gauss20/pd/k05/py/md_model.bin");
+  fp = fopen(flnm, "r");
+  nr = fread(data, sizeof(double), NX*NY, fp);
+  nw = NX*NY;
+  if(nr != nw){
+    fprintf(stderr, "\nError : fread\n\n");exit(1);
+  }
+  
+  for(m = 0 ; m < NY ; m++){
+    for(n = 0 ; n < NX ; n++){
+      model_depth[n][m] = (double)data[m*NX + n];
+    }
+  }
+
+  // modelでブロックごとに平均をとり、中心の点を求める
+  for(bn = 0 ; bn <= num_bsx ; bn++){
+    b0[0] = bn * pitch;    // 0, 10, 20, ... exp. pitch = 10 
+    b1[0] = b0[0] + block_size; // 15, 25, ...
+    for(bm = 0 ; bm <= num_bsy ; bm++){
+      b0[1] = bm * pitch;
+      b1[1] = b0[1] + block_size;
+
+      tmp = 0.0;
+      for(n = b0[0] ; n < b1[0] ; n++){
+        for(m = b0[1] ; m < b1[1] ; m++){
+          tmp += model_depth[n][m];
+        }
+      }
+
+      model_d[bn][bm] = tmp / (double)(block_size * block_size);
+    }
+  }
+  sprintf(flnm, "./model_d.dat");
+  fp = fopen(flnm, "w");
+  for(bn = r ; bn <= num_bsx - r ; bn++){
+    for(bm = r ; bm <= num_bsy - r ; bm++){
+      fprintf(fp, "%4d %4d  %f\n", bn*pitch + hbsn, bm*pitch + hbsm, model_d[bn][bm]);
+    }
+    fprintf(fp, "\n");
+  }
+  fclose(fp);
+  
 #endif
 
   // 平面
@@ -275,7 +322,7 @@ int main(int argc, char *argv[]){
       d_est[bn][bm] = dk[0];
       k_est[bn][bm] = dk[1];
     }
-    }
+  }
   //gaussNewtonMethod(go, block_size, 27, 27, dk);
   
   sprintf(flnm, "./d_est.dat");
@@ -289,8 +336,8 @@ int main(int argc, char *argv[]){
   fclose(fp);
 
   //---------------------------------------------------------------------------  
-  // ブロック単位のモデル形状
-  double tmp;
+  // ブロック単位のモデル形状 こっちの方がRMSE高い
+  /*
   for(bn = 0 ; bn <= num_bsx ; bn++){
     b0[0] = bn * pitch;    // 0, 10, 20, ... exp. pitch = 10 
     b1[0] = b0[0] + block_size; // 15, 25, ...
@@ -317,7 +364,7 @@ int main(int argc, char *argv[]){
     fprintf(fp, "\n");
   }
   fclose(fp);
-  
+  */
   //---------------------------------------------------------------------------
   // RMSE -rで指定した分だけ外側のブロックは誤差計測に使用しない
   int sum = 0;
@@ -326,7 +373,7 @@ int main(int argc, char *argv[]){
   RMSE = 0.0;
   for(bm = r ; bm <= num_bsy - r ; bm++){
     for(bn = r ; bn <= num_bsx - r ; bn++){
-      tmp = d_model[bn][bm] - d_est[bn][bm];
+      tmp = model_d[bn][bm] - d_est[bn][bm];
       RMSE += tmp * tmp;
       sum++;
     }
