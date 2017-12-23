@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <nd_malloc.h>
+#include "pre_filter.h"
 
 /**** Default値の設定 ****/
 #define BLOCK_SIZE  13
@@ -13,11 +14,13 @@
 #define RR           1
 
 // フラグ
-#define QUANT_FLG    0
-#define ONOISE_FLG   0
+#define QUANT_FLG    1
+#define ONOISE_FLG   1
 #define LIMIT_FLG    0
 #define SRAND_FLG    0
 #define HEIMEN       0
+
+#define ON_SGM      0.5
 
 #define NX         320
 #define NY         240
@@ -30,14 +33,18 @@
 
 #define NHP         11
 #define NHLPF       25
+#define PRE_HS       3
+#define PRE_N        0
+
+//#define h(x, y) hh[(x) + (L-1)/2][(y) + (L-1)/2]
 
 int main(int argc, char *argv[]){
   FILE *fp;
   IMAGE img_go;
   char flnm[256];
   int nr, nw, zn, n, m, bn, bm, b0[2], b1[2];
-  double ***go, ***go_t, **model_depth, **model_d;
-  double **d, **d_est, **k_est, tmp;//**d_model
+  double ***go, ***go_t, ***go_pre, **model_depth, **model_d;
+  double **d, **d_est, **k_est, tmp;// **d_model;
   double data[(NHP+NX+NHP) * (NHP+NY+NHP)];
 
   time_t t1, t2;
@@ -47,11 +54,13 @@ int main(int argc, char *argv[]){
   char c;
   void usage(char *);
   void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y, double *dk);
+  double gauss(void);
   
 #if SRAND_FLG == 1
   srandom(time(NULL));
 #endif
-  
+
+  // gngosa -b 15 -p 10 -r 1
   //---------------------------------------------------------------------------
   // 引数の処理
   if (argc < 2) usage(argv[0]);
@@ -104,7 +113,10 @@ int main(int argc, char *argv[]){
   go = malloc_double_3d(NZ, 0, NX + 2*NHP, NHP, NY + 2*NHP, NHP);
   
   // go_t[zn][15*20][15*13]
-  go_t = malloc_double_3d(NZ, 0, NNX + 2*NHP, NHP, NNY + 2*NHP, NHP);
+  go_t = malloc_double_3d(NZ, 0, NNX + 2*NHP + 2*PRE_HS, NHP + PRE_HS, NNY + 2*NHP + 2*PRE_HS, NHP + PRE_HS);
+
+  // go_pre[zn][][]
+  go_pre = malloc_double_3d(NZ, 0, NNX + 2*NHP, NHP, NNY + 2*NHP, NHP);
 
   // model.binをfreedして格納するための配列
   model_depth = malloc_double_2d(NX, 0, NY, 0);
@@ -272,6 +284,7 @@ int main(int argc, char *argv[]){
     wIMAGE(img_go, flnm);
   }//zn
 
+  // go_t <- go
   for(zn = 0 ; zn < NZ ; zn++){
     for(n = 0 ; n < NNX ; n++){
       for(m = 0 ; m < NNY ; m++){
@@ -279,51 +292,82 @@ int main(int argc, char *argv[]){
       }
     }
   }
-  
+
   //---------------------------------------------------------------------------
   printf("------------------------\n");
   // 折り返し処理 折り返した部分は誤差計算には使わない
   for(zn = 0 ; zn < NZ ; zn++){
-    // left side
+    // left side right side
     for(m = 0 ; m < NNY ; m++){
-      for(n = 1 ; n <= NHP ; n++){
+      for(n = 1 ; n <= NHP + PRE_HS ; n++){
 	go_t[zn][-n][m] = go_t[zn][n][m];
-      }
-    }
-    
-    // right side
-    for(m = 0 ; m < NNY ; m++){
-      for(n = 1 ; n <= NHP ; n++){
 	go_t[zn][NNX - 1 + n][m] = go_t[zn][NNX - 1 - n][m];
       }
     }
-    
-    // up side
-    for(n = -NHP ; n < NNX + NHP ; n++){
-      for(m = 1 ; m <= NHP ; m++){
+       
+    // up side down side
+    for(n = -(NHP + PRE_HS) ; n < NNX + (NHP + PRE_HS) ; n++){
+      for(m = 1 ; m <= NHP + PRE_HS ; m++){
 	go_t[zn][n][-m] = go_t[zn][n][m];
-      }
-    }
-    
-    // down side
-    for(n = -NHP ; n < NNX + NHP ; n++){
-      for(m = 1 ; m <= NHP ; m++){
 	go_t[zn][n][NNY - 1 + m] = go_t[zn][n][NNY - 1 - m];
       }
     }
+    sprintf(flnm, "./model/go_t_%d.dat", zn);
+    fp = fopen(flnm, "w");
+    for(n = -NHP ; n < NNX + NHP ; n++){
+      for(m = -NHP ; m < NNY + NHP ; m++){
+        fprintf(fp, "%4d %4d  %f\n", n, m, go_t[zn][n][m]);
+      }
+    }
+    fclose(fp);
+    sprintf(flnm, "./model/go_t_%d.bmp", zn);
   }
+  
+  //---------------------------------------------------------------------------
+  // HPFをかけて低い周波数成分を除去
+  int ii, jj;
+  for(zn = 0 ; zn < NZ ; zn++){
+    for(bm = -NHP ; bm < NNY + NHP ; bm++){
+      for(bn = -NHP ; bn < NNX + NHP ; bn++){
+	tmp = 0.0;
+	for(jj = -PRE_HS ; jj <= PRE_HS ; jj++){
+	  for(ii = -PRE_HS ; ii <= PRE_HS ; ii++){
+	    tmp += go_t[zn][bn - ii][bm - jj] * pre[PRE_N][ii + PRE_HS][jj + PRE_HS]; 
+	  }
+	}
+	go_pre[zn][bn][bm] = tmp;
+      }
+    }
 
+    for(bm = -NHP ; bm < NNY + NHP ; bm++){
+      for(bn = -NHP ; bn < NNX + NHP ; bn++){
+	go_pre[zn][bn][bm] = go_t[zn][bn][bm];
+      }
+    }/*
+    sprintf(flnm, "./model/go_pre_%d.dat", zn);
+    fp = fopen(flnm, "w");
+    for(n = -NHP ; n < NNX + NHP ; n++){
+      for(m = -NHP ; m < NNY + NHP ; m++){
+        fprintf(fp, "%4d %4d  %f\n", n, m, go_pre[zn][n][m]);
+      }
+    }
+    fclose(fp);
+    sprintf(flnm, "./model/go_pre_%d.bmp", zn);
+     */
+  }
+  
   //---------------------------------------------------------------------------
   //ピッチ分だけ動かしながら、ブロックの中心の座標とブロックサイズ等をGause-Newton関数へ
   double dk[2];
+  
   for(bm = 0 ; bm <= num_bsy ; bm++){
     for(bn = 0 ; bn <= num_bsx ; bn++){
-      gaussNewtonMethod(go, NZ, block_size, hbsn + pitch*bn, hbsm + pitch*bm, dk);
+      gaussNewtonMethod(go_t, NZ, block_size, hbsn + pitch*bn, hbsm + pitch*bm, dk);
       d_est[bn][bm] = dk[0];
       k_est[bn][bm] = dk[1];
     }
   }
-  //gaussNewtonMethod(go, block_size, 27, 27, dk);
+  //gaussNewtonMethod(go_t, NZ, block_size, 107, 107, dk);
   
   sprintf(flnm, "./d_est.dat");
   fp = fopen(flnm, "w");
@@ -397,4 +441,17 @@ void usage(char *com){
   fprintf(stderr, "\n");
 
   exit(1);
+}
+
+/*--------------------------------------------------------------------------*/  
+double gauss(void){
+  double rnd(void);
+
+  return rnd() + rnd() + rnd() + rnd() + rnd() + rnd() +
+    rnd() + rnd() + rnd() + rnd() + rnd() + rnd() - 6.0;
+}
+
+/*--------------------------------------------------------------------------*/  
+double rnd(void){
+  return (double)random() / (double) RAND_MAX;
 }
