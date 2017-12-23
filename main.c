@@ -339,11 +339,12 @@ int main(int argc, char *argv[]){
       }
     }
 
+    /*
     for(bm = -NHP ; bm < NNY + NHP ; bm++){
       for(bn = -NHP ; bn < NNX + NHP ; bn++){
 	go_pre[zn][bn][bm] = go_t[zn][bn][bm];
       }
-    }/*
+    }
     sprintf(flnm, "./model/go_pre_%d.dat", zn);
     fp = fopen(flnm, "w");
     for(n = -NHP ; n < NNX + NHP ; n++){
@@ -362,7 +363,7 @@ int main(int argc, char *argv[]){
   
   for(bm = 0 ; bm <= num_bsy ; bm++){
     for(bn = 0 ; bn <= num_bsx ; bn++){
-      gaussNewtonMethod(go_t, NZ, block_size, hbsn + pitch*bn, hbsm + pitch*bm, dk);
+      gaussNewtonMethod(go_pre, NZ, block_size, hbsn + pitch*bn, hbsm + pitch*bm, dk);
       d_est[bn][bm] = dk[0];
       k_est[bn][bm] = dk[1];
     }
