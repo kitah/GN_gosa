@@ -5,11 +5,12 @@
 #include <imageio.h>
 #include "bpf.h"
 
-#define SGMC 0.85 //0.72
-#define PSF_HS 11
-#define BPF_HS  3
-#define DELTA 0.001
-#define BPF_N 0
+#define SGMC    0.85 //0.72
+#define PSF_HS    11
+#define BPF_HS     3
+#define DELTA  0.001
+#define BPF_N      0
+#define MAP_N      3
 //#define h(x,y) hh[(x)+(L-1)/2][(y)+(L-1)/2]
 
 void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y, double *dk){
@@ -26,6 +27,28 @@ void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y,
   double **p0, **p1, **p2;
   double e[NZ], mz[NZ], d0k0[2], e1[NZ];
   double k0, d0, deltad, deltak, dprev, kprev, eprev, enow;
+
+  double map[BS][BS];
+  for(j = 0 ; j < BS ; j++){
+    for(i = 0 ; i < BS ; i++){
+      map[i][j] = 0.25;
+    }
+  }
+  for(j = 1 ; j < BS-1 ; j++){
+    for(i = 1 ; i < BS-1 ; i++){
+      map[i][j] += 0.25;
+    }
+  }
+  for(j = 2 ; j < BS-2 ; j++){
+    for(i = 2 ; i < BS-2 ; i++){
+      map[i][j] += 0.25;
+    }
+  }
+  for(j = 3 ; j < BS-3 ; j++){
+    for(i = 3 ; i < BS-3 ; i++){
+      map[i][j] += 0.25;
+    }
+  }
   
   void psf(double k, int z, double d, double sgmc, int psf_hs, double **p);
   void dpsfdd(double k, int z, double d, double sgmc, int psf_hs, double **p);
@@ -135,11 +158,11 @@ void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y,
 	e[2] += tmp_e3 * tmp_e3;
 	
 	tmp_a00_01 += (f0pd1[i][j] - f1pd0[i][j]) * (f0pd1[i][j] - f1pd0[i][j]);
-	tmp_a00_12 += (f1pd2[i][j] - f2pd1[i][j]) * (f1pd2[i][j] - f2pd1[i][j]);  
+	tmp_a00_12 += (f1pd2[i][j] - f2pd1[i][j]) * (f1pd2[i][j] - f2pd1[i][j]);
 	tmp_a00_02 += (f0pd2[i][j] - f2pd0[i][j]) * (f0pd2[i][j] - f2pd0[i][j]);
 
 	tmp_a01_01 += (f0pd1[i][j] - f1pd0[i][j]) * (f0pk1[i][j] - f1pk0[i][j]);
-	tmp_a01_12 += (f1pd2[i][j] - f2pd1[i][j]) * (f1pk2[i][j] - f2pk1[i][j]);  
+	tmp_a01_12 += (f1pd2[i][j] - f2pd1[i][j]) * (f1pk2[i][j] - f2pk1[i][j]);
 	tmp_a01_02 += (f0pd2[i][j] - f2pd0[i][j]) * (f0pk2[i][j] - f2pk0[i][j]);
 	
 	tmp_a11_01 += (f0pk1[i][j] - f1pk0[i][j]) * (f0pk1[i][j] - f1pk0[i][j]);
@@ -148,24 +171,27 @@ void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y,
 	
 	b0 += tmp_e1 * (f0pd1[i][j] - f1pd0[i][j]) + tmp_e2 * (f1pd2[i][j] - f2pd1[i][j]) + tmp_e3 * (f0pd2[i][j] - f2pd0[i][j]);
 	b1 += tmp_e1 * (f0pk1[i][j] - f1pk0[i][j]) + tmp_e2 * (f1pk2[i][j] - f2pk1[i][j]) + tmp_e3 * (f0pk2[i][j] - f2pk0[i][j]);
+	
+	/*
+	e[0] += tmp_e1 * tmp_e1 * map[i][j];
+	e[1] += tmp_e2 * tmp_e2 * map[i][j];
+	e[2] += tmp_e3 * tmp_e3 * map[i][j];
+	
+	tmp_a00_01 += (f0pd1[i][j] - f1pd0[i][j]) * (f0pd1[i][j] - f1pd0[i][j]) * map[i][j];
+	tmp_a00_12 += (f1pd2[i][j] - f2pd1[i][j]) * (f1pd2[i][j] - f2pd1[i][j]) * map[i][j];  
+	tmp_a00_02 += (f0pd2[i][j] - f2pd0[i][j]) * (f0pd2[i][j] - f2pd0[i][j]) * map[i][j];
 
-	/*if((j = 0) || (j == (BS-1))){
-	  e[0] = e[0] * 0.2;
-	  e[1] = e[0] * 0.2;
-	  e[2] = e[0] * 0.2;
-
-	  tmp_a00_01 = tmp_a00_01 * 0.2;
-	  tmp_a00_12 = tmp_a00_12 * 0.2;
-	  tmp_a00_02 = tmp_a00_02 * 0.2;
-
-	  tmp_a01_01 = tmp_a01_01 * 0.2;
-	  tmp_a01_12 = tmp_a01_12 * 0.2;
-	  tmp_a01_02 = tmp_a01_02 * 0.2;
-
-	  tmp_a11_01 = tmp_a11_01 * 0.2;
-	  tmp_a11_12 = tmp_a11_12 * 0.2;
-	  tmp_a11_02 = tmp_a11_02 * 0.2;
-	  }*/
+	tmp_a01_01 += (f0pd1[i][j] - f1pd0[i][j]) * (f0pk1[i][j] - f1pk0[i][j]) * map[i][j];
+	tmp_a01_12 += (f1pd2[i][j] - f2pd1[i][j]) * (f1pk2[i][j] - f2pk1[i][j]) * map[i][j];  
+	tmp_a01_02 += (f0pd2[i][j] - f2pd0[i][j]) * (f0pk2[i][j] - f2pk0[i][j]) * map[i][j];
+	
+	tmp_a11_01 += (f0pk1[i][j] - f1pk0[i][j]) * (f0pk1[i][j] - f1pk0[i][j]) * map[i][j];
+	tmp_a11_12 += (f1pk2[i][j] - f2pk1[i][j]) * (f1pk2[i][j] - f2pk1[i][j]) * map[i][j];  
+	tmp_a11_02 += (f0pk2[i][j] - f2pk0[i][j]) * (f0pk2[i][j] - f2pk0[i][j]) * map[i][j];
+	
+	b0 += tmp_e1 * (f0pd1[i][j] - f1pd0[i][j]) * map[i][j] + tmp_e2 * (f1pd2[i][j] - f2pd1[i][j]) * map[i][j] + tmp_e3 * (f0pd2[i][j] - f2pd0[i][j]) * map[i][j];
+	b1 += tmp_e1 * (f0pk1[i][j] - f1pk0[i][j]) * map[i][j] + tmp_e2 * (f1pk2[i][j] - f2pk1[i][j]) * map[i][j] + tmp_e3 * (f0pk2[i][j] - f2pk0[i][j]) * map[i][j];
+	*/
       }
     }
 
