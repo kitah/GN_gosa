@@ -5,7 +5,7 @@
 #include <imageio.h>
 #include "bpf.h"
 
-#define SGMC    0.85 //0.72
+#define SGMC    0.95 //0.72
 #define PSF_HS    11
 #define BPF_HS     3
 #define DELTA  0.001
@@ -152,7 +152,7 @@ void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y,
 	tmp_e1 = (f0p1[i][j] - f1p0[i][j]);
 	tmp_e2 = (f1p2[i][j] - f2p1[i][j]);
 	tmp_e3 = (f0p2[i][j] - f2p0[i][j]);
-
+	
 	e[0] += tmp_e1 * tmp_e1;
 	e[1] += tmp_e2 * tmp_e2;
 	e[2] += tmp_e3 * tmp_e3;
