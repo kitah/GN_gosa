@@ -12,10 +12,11 @@
 #define BLOCK_SIZE  13
 #define PITCH       13
 #define RR           1
+#define SGMC      0.85
 
 // フラグ
-#define QUANT_FLG    1
-#define ONOISE_FLG   1
+#define QUANT_FLG    0
+#define ONOISE_FLG   0
 #define LIMIT_FLG    0
 #define SRAND_FLG    0
 #define HEIMEN       0
@@ -50,10 +51,11 @@ int main(int argc, char *argv[]){
   time_t t1, t2;
   t1 = time(NULL);
   
-  int pitch = PITCH, block_size = BLOCK_SIZE, r = RR;
+  int pitch = PITCH, block_size = BLOCK_SIZE, r = RR, quant_flg = QUANT_FLG, onoise_flg = ONOISE_FLG;
   char c;
+  double sgmc = SGMC;
   void usage(char *);
-  void gaussNewtonMethod(double ***fn, int nz, int BS, int center_x, int center_y, double *dk);
+  void gaussNewtonMethod(double ***fn, int nz, int BS, double sgmc, int center_x, int center_y, double *dk);
   double gauss(void);
   
 #if SRAND_FLG == 1
@@ -65,7 +67,7 @@ int main(int argc, char *argv[]){
   // 引数の処理
   if (argc < 2) usage(argv[0]);
 
-  while((c = getopt(argc, argv, "b:p:r:")) != -1){
+  while((c = getopt(argc, argv, "b:p:r:c:qn")) != -1){
     switch(c) {
     case 'b':
       block_size = atoi(optarg);
@@ -75,6 +77,15 @@ int main(int argc, char *argv[]){
       break;
     case 'r':
       r = atoi(optarg);
+      break;
+    case 'c':
+      sgmc = atof(optarg);
+      break;
+    case 'q':
+      quant_flg = 1;
+      break;
+    case 'n':
+      onoise_flg = 1;
       break;
     default:
       usage(argv[0]);
@@ -87,6 +98,11 @@ int main(int argc, char *argv[]){
   printf("\nBS = %d\n", block_size);
   printf("pitch = %d\n", pitch);
   printf("R = %d\n", r);
+  printf("sgmc = %.2f\n", sgmc);
+  if(quant_flg == 1) printf("quant: ON  ");
+  else printf("quant: OFF  ");
+  if(onoise_flg == 1) printf("noise: ON\n");
+  else printf("noise: OFF\n");
 
   int num_bsx = 0, num_bsy = 0;
   int  hbsn = (block_size-1) / 2, hbsm = (block_size-1) / 2;
@@ -164,7 +180,7 @@ int main(int argc, char *argv[]){
 #if HEIMEN == 0
   for(zn = 0 ; zn < NZ ; zn++){
     //sprintf(flnm, "./../obs_img/k05/d0515/d0515_ra_0%d.bin", zn);
-    sprintf(flnm, "/home/v4/tyoshida/imagep/focus/kmfg/md3/gauss20/no/k05/pl/md_ra_0%d.bin", zn);
+    sprintf(flnm, "/home/v2unix/com_img/md_img/kmfg/md3/gauss20/no/k05/pl/md_ra_0%d.bin", zn);
     fp = fopen(flnm, "r");
     nr = fread(data, sizeof(double), NX*NY, fp);
     nw = NX*NY;
@@ -178,9 +194,9 @@ int main(int argc, char *argv[]){
       }
     }
   }
-  
+
   // model.binをfreedする
-  sprintf(flnm, "/home/v4/tyoshida/imagep/focus/kmfg/md3/gauss20/no/k05/pl/md_model.bin");
+  sprintf(flnm, "/home/v2unix/com_img/md_img/kmfg/md3/gauss20/no/k05/pl/md_model.bin");
   fp = fopen(flnm, "r");
   nr = fread(data, sizeof(double), NX*NY, fp);
   nw = NX*NY;
@@ -208,7 +224,6 @@ int main(int argc, char *argv[]){
           tmp += model_depth[n][m];
         }
       }
-
       model_d[bn][bm] = tmp / (double)(block_size * block_size);
     }
   }
@@ -221,7 +236,6 @@ int main(int argc, char *argv[]){
     fprintf(fp, "\n");
   }
   fclose(fp);
-  
 #endif
 
   // 平面
@@ -247,14 +261,11 @@ int main(int argc, char *argv[]){
   for(zn = 0 ; zn < NZ ; zn++){
     for(n = -NHP ; n < NX + NHP ; n++){
       for(m = -NHP ; m < NY + NHP ; m++){
-        
-#if ONOISE_FLG == 1
-        go[zn][n][m] = go[zn][n][m] + ON_SGM * gauss();
-#endif
+	// noise
+	if(onoise_flg == 1) go[zn][n][m] = go[zn][n][m] + ON_SGM * gauss();
 
-#if QUANT_FLG == 1
-        go[zn][n][m] = floor(go[zn][n][m] + 0.5);
-#endif
+	// quant
+	if(quant_flg == 1) go[zn][n][m] = floor(go[zn][n][m] + 0.5);
 
 #if LIMIT_FLG == 1
         if (go[zn][n][m] > 255.0) {
@@ -338,23 +349,6 @@ int main(int argc, char *argv[]){
 	go_pre[zn][bn][bm] = tmp;
       }
     }
-
-    /*
-    for(bm = -NHP ; bm < NNY + NHP ; bm++){
-      for(bn = -NHP ; bn < NNX + NHP ; bn++){
-	go_pre[zn][bn][bm] = go_t[zn][bn][bm];
-      }
-    }
-    sprintf(flnm, "./model/go_pre_%d.dat", zn);
-    fp = fopen(flnm, "w");
-    for(n = -NHP ; n < NNX + NHP ; n++){
-      for(m = -NHP ; m < NNY + NHP ; m++){
-        fprintf(fp, "%4d %4d  %f\n", n, m, go_pre[zn][n][m]);
-      }
-    }
-    fclose(fp);
-    sprintf(flnm, "./model/go_pre_%d.bmp", zn);
-     */
   }
   
   //---------------------------------------------------------------------------
@@ -363,12 +357,11 @@ int main(int argc, char *argv[]){
   
   for(bm = 0 ; bm <= num_bsy ; bm++){
     for(bn = 0 ; bn <= num_bsx ; bn++){
-      gaussNewtonMethod(go_pre, NZ, block_size, hbsn + pitch*bn, hbsm + pitch*bm, dk);
+      gaussNewtonMethod(go_pre, NZ, block_size, sgmc, hbsn + pitch*bn, hbsm + pitch*bm, dk);
       d_est[bn][bm] = dk[0];
       k_est[bn][bm] = dk[1];
     }
   }
-  //gaussNewtonMethod(go_t, NZ, block_size, 107, 107, dk);
   
   sprintf(flnm, "./d_est.dat");
   fp = fopen(flnm, "w");
@@ -429,16 +422,19 @@ int main(int argc, char *argv[]){
   
   t2 = time(NULL);
   printf("\n");
-  printf("[time] : %d[minutes]\n\n", (int)((t2 - t1)/60));
+  printf("[time] : %d[s]\n\n", (int)((t2 - t1)));
 }
   
 /*--------------------------------------------------------------------------*/
 void usage(char *com){
   fprintf(stderr, "\n");
-  fprintf(stderr, "  Usage : %s [-bpr]\n\n", com);
+  fprintf(stderr, "  Usage : %s [-b:p:r:c:qn]\n\n", com);
   fprintf(stderr, "          -b <value> : BlockSize Odd   (int)\n");
   fprintf(stderr, "          -p <value> : Block Pitch     (int)\n");
   fprintf(stderr, "          -r <value> : Exclusion Block (int)\n");
+  fprintf(stderr, "          -c <value> : SGMC (double)\n");
+  fprintf(stderr, "          -q : quant flag (bool)\n");
+  fprintf(stderr, "          -n : noise flag (bool)\n");
   fprintf(stderr, "\n");
 
   exit(1);
