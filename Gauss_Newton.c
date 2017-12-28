@@ -5,8 +5,7 @@
 #include <imageio.h>
 #include "bpf.h"
 
-//#define SGMC    0.85 //0.72
-#define PSF_HS    11
+#define PSF_HS    10
 #define BPF_HS     3
 #define DELTA  0.001
 #define BPF_N      0
@@ -14,7 +13,6 @@
 
 void gaussNewtonMethod(double ***fn, int nz, int BS, double sgmc, int center_x, int center_y, double *dk){
   int i, j, count, NZ = nz;
-  //  double sgmc = SGMC;
   double tmp_e1, tmp_e2, tmp_e3;
   double tmp_a00_01, tmp_a00_12, tmp_a00_02, tmp_a01_01, tmp_a01_12, tmp_a01_02, tmp_a11_01, tmp_a11_12, tmp_a11_02;
   double a00, a01, a10, a11, b0, b1;
@@ -89,7 +87,7 @@ void gaussNewtonMethod(double ***fn, int nz, int BS, double sgmc, int center_x, 
 
   d0 = d0k0[0];
   k0 = d0k0[1];
-  
+
   count = 0;
   eprev = enow = 0.0;
   
@@ -130,7 +128,7 @@ void gaussNewtonMethod(double ***fn, int nz, int BS, double sgmc, int center_x, 
 	tmp_e1 = (f0p1[i][j] - f1p0[i][j]);
 	tmp_e2 = (f1p2[i][j] - f2p1[i][j]);
 	tmp_e3 = (f0p2[i][j] - f2p0[i][j]);
-	
+	/*
 	e[0] += tmp_e1 * tmp_e1;
 	e[1] += tmp_e2 * tmp_e2;
 	e[2] += tmp_e3 * tmp_e3;
@@ -149,8 +147,8 @@ void gaussNewtonMethod(double ***fn, int nz, int BS, double sgmc, int center_x, 
 	
 	b0 += tmp_e1 * (f0pd1[i][j] - f1pd0[i][j]) + tmp_e2 * (f1pd2[i][j] - f2pd1[i][j]) + tmp_e3 * (f0pd2[i][j] - f2pd0[i][j]);
 	b1 += tmp_e1 * (f0pk1[i][j] - f1pk0[i][j]) + tmp_e2 * (f1pk2[i][j] - f2pk1[i][j]) + tmp_e3 * (f0pk2[i][j] - f2pk0[i][j]);
+	*/
 	
-	/*
 	e[0] += tmp_e1 * tmp_e1 * map[i][j];
 	e[1] += tmp_e2 * tmp_e2 * map[i][j];
 	e[2] += tmp_e3 * tmp_e3 * map[i][j];
@@ -169,7 +167,7 @@ void gaussNewtonMethod(double ***fn, int nz, int BS, double sgmc, int center_x, 
 	
 	b0 += tmp_e1 * (f0pd1[i][j] - f1pd0[i][j]) * map[i][j] + tmp_e2 * (f1pd2[i][j] - f2pd1[i][j]) * map[i][j] + tmp_e3 * (f0pd2[i][j] - f2pd0[i][j]) * map[i][j];
 	b1 += tmp_e1 * (f0pk1[i][j] - f1pk0[i][j]) * map[i][j] + tmp_e2 * (f1pk2[i][j] - f2pk1[i][j]) * map[i][j] + tmp_e3 * (f0pk2[i][j] - f2pk0[i][j]) * map[i][j];
-	*/
+	
       }
     }
 

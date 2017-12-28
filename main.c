@@ -32,12 +32,10 @@
 
 #define K            8
 
-#define NHP         11
+#define NHP         10
 #define NHLPF       25
 #define PRE_HS       3
 #define PRE_N        0
-
-//#define h(x, y) hh[(x) + (L-1)/2][(y) + (L-1)/2]
 
 int main(int argc, char *argv[]){
   FILE *fp;
@@ -180,7 +178,7 @@ int main(int argc, char *argv[]){
 #if HEIMEN == 0
   for(zn = 0 ; zn < NZ ; zn++){
     //sprintf(flnm, "./../obs_img/k05/d0515/d0515_ra_0%d.bin", zn);
-    sprintf(flnm, "/home/v2unix/com_img/md_img/kmfg/md3/gauss20/no/k05/pl/md_ra_0%d.bin", zn);
+    sprintf(flnm, "/home/v2unix/com_img/md_img/kmfg/md3/gauss20/pd/k03/eg/md_ra_0%d.bin", zn);
     fp = fopen(flnm, "r");
     nr = fread(data, sizeof(double), NX*NY, fp);
     nw = NX*NY;
@@ -196,7 +194,7 @@ int main(int argc, char *argv[]){
   }
 
   // model.binをfreedする
-  sprintf(flnm, "/home/v2unix/com_img/md_img/kmfg/md3/gauss20/no/k05/pl/md_model.bin");
+  sprintf(flnm, "/home/v2unix/com_img/md_img/kmfg/md3/gauss20/pd/k03/eg/md_model.bin");
   fp = fopen(flnm, "r");
   nr = fread(data, sizeof(double), NX*NY, fp);
   nw = NX*NY;
@@ -406,17 +404,21 @@ int main(int argc, char *argv[]){
   //---------------------------------------------------------------------------
   // RMSE -rで指定した分だけ外側のブロックは誤差計測に使用しない
   int sum = 0;
-  double RMSE;
+  double RMSE = 0.0;
   tmp = 0.0;
   RMSE = 0.0;
   for(bm = r ; bm <= num_bsy - r ; bm++){
     for(bn = r ; bn <= num_bsx - r ; bn++){
+      printf("(x,y) : %d %d\n", bn, bm);
       tmp = model_d[bn][bm] - d_est[bn][bm];
-      RMSE += tmp * tmp;
+      printf("tmp = %f\n", tmp);
+      printf("tmp^2 = %f\n", tmp*tmp);
+      RMSE += (tmp) * (tmp);
       sum++;
     }
   }
   printf("all block num = %d\n", sum);
+  //printf("rmse = %f\n", RMSE);
   RMSE = sqrt(RMSE / (double)(sum));
   printf("RMSE = %f\n", RMSE);
   
